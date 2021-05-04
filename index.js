@@ -48,6 +48,40 @@ const checkAndCreateFolder = (pathToCheck, folderName) => {
         fs.mkdirSync(path.join(pathToCheck, folderName));
     }
 }
+const getReqBodyJson = ({ req, res }) => {
+    return new Promise((resolve) => {
+        let body = '';
+        req.on('data', chunk => {
+            body += chunk.toString();
+        });
+        req.on('end', async () => {
+            try {
+                let jsonBody = JSON.parse(body);
+                resolve({
+                    fields: jsonBody
+                });
+            } catch (e) {
+                resolve({
+                    error: {
+                        code: 'INVALID_FORMAT'
+                    }
+                });
+            }
+        });
+    });
+};
+const getJsonFromFile = (filePath) => {
+    let jsonContent = {
+        data: []
+    };
+    try {
+        let recordsContent = fs.readFileSync(filePath, { encoding: 'utf-8' });
+        jsonContent = JSON.parse(recordsContent);
+    } catch(e) {
+        // swallow
+    }
+    return jsonContent;
+};
 const handleTableAction = async ({ req, res, queryParams }) => {
     let responseData = {
         data: []
@@ -56,22 +90,17 @@ const handleTableAction = async ({ req, res, queryParams }) => {
     let filePath = path.join(configs.projectPath, 'data', queryParams.tablename + '.json');
     let isFileExists = fs.existsSync(filePath);
     if (req.method === 'POST') {
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
-        req.on('end', async () => {
-            try {
-                let jsonBody = JSON.parse(body);
+        getReqBodyJson({ req, res}).then(fieldsResp => {
+            if (fieldsResp.fields) {
+                let jsonBody = fieldsResp.fields;
                 jsonBody['id'] = guid();
                 let fileContent = {
                     data: [jsonBody]
                 };
                 let records = [jsonBody];
                 if (isFileExists) {
-                    let recordsContent = fs.readFileSync(filePath, { encoding: 'utf-8' });
-                    let recordsJson = JSON.parse(recordsContent);
-                    if (recordsJson && recordsJson.data) {
+                    let recordsJson = getJsonFromFile(filePath);
+                    if (recordsJson && recordsJson.data && recordsJson.data instanceof Array) {
                         recordsJson.data.push(jsonBody);
                     }
                     records = recordsJson.data;
@@ -81,7 +110,7 @@ const handleTableAction = async ({ req, res, queryParams }) => {
                 res.ok({
                     data: records
                 });
-            } catch (e) {
+            } else {
                 res.ok({
                     error: {
                         code: 'INVALID_FORMAT'
@@ -107,16 +136,11 @@ const handleTableAction = async ({ req, res, queryParams }) => {
     }
 
     if (req.method === 'PATCH' && queryParams.id) {
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk.toString();
-        });
-        req.on('end', async () => {
-            try {
-                let jsonBody = JSON.parse(body);
+        getReqBodyJson({ req, res}).then(fieldsResp => {
+            if (fieldsResp.fields) {
+                let jsonBody = fieldsResp.fields;
                 if (isFileExists) {
-                    let recordsContent = fs.readFileSync(filePath, { encoding: 'utf-8' });
-                    let recordsJson = JSON.parse(recordsContent);
+                    let recordsJson = getJsonFromFile(filePath);
                     if (recordsJson && recordsJson.data && recordsJson.data instanceof Array) {
                         let lengthOfRecords = recordsJson.data.length;
                         for (let i = 0; i < lengthOfRecords; i++) {
@@ -133,7 +157,7 @@ const handleTableAction = async ({ req, res, queryParams }) => {
                     fs.writeFileSync(filePath, JSON.stringify(recordsJson));
                 }
                 res.ok(responseData);
-            } catch (e) {
+            } else {
                 res.ok({
                     error: {
                         code: 'INVALID_FORMAT'
@@ -180,7 +204,7 @@ const handleTableAction = async ({ req, res, queryParams }) => {
 const requestHandler = (req, res) => {
     res.ok = (data = {}) => {
         sendResponse({
-            req, 
+            req,
             res,
             data
         });
